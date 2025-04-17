@@ -1,6 +1,4 @@
-FROM debian as builder
-
-LABEL maintainer="Nicolas LAURENT <docker@aegypius.com>"
+FROM debian AS builder
 
 RUN apt-get update -qy && apt-get install -y curl lzma
 

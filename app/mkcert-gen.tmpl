@@ -4,20 +4,44 @@ source /app/functions.sh
 
 [[ $DEBUG == true ]] && set -x
 
-# Mimic Let's encrypt structure
 function gen {
-  [ -f "$1.crt" ] || {
-    CERT_FILE="./$1/fullchain.pem"
-    KEY_FILE="./$1/key.pem"
-    mkdir -p $1
-    mkcert -cert-file ${CERT_FILE} -key-file ${KEY_FILE} "$@"
+  local hosts=("$@")
+  local primary="${hosts[0]}"
+  local cert_file="./$primary/fullchain.pem"
+  local key_file="./$primary/key.pem"
 
-    ln -s ${CERT_FILE} $1.crt
-    ln -s ${KEY_FILE} $1.key
+  mkdir -p "$primary"
 
+  # Check if cert already exists
+  if [[ ! -f "$cert_file" ]]; then
+    echo "Certificate for $primary doesn't exist — generating for: ${hosts[*]}"
+    mkcert -cert-file "$cert_file" -key-file "$key_file" "${hosts[@]}"
     reload_nginx
-  }
-  [ -f ./dhparam.pem ] && [ ! -f $1.dhparam.pem ] && ln -s ./dhparam.pem $1.dhparam.pem
+  else
+    # Check if existing cert includes all requested hostnames
+    missing_host=false
+    for host in "${hosts[@]}"; do
+      if ! openssl x509 -in "$cert_file" -noout -text | grep -q "DNS:$host"; then
+        missing_host=true
+        break
+      fi
+    done
+
+    if [[ "$missing_host" == true ]]; then
+      echo "Certificate missing some hosts — regenerating for: ${hosts[*]}"
+      mkcert -cert-file "$cert_file" -key-file "$key_file" "${hosts[@]}"
+      reload_nginx
+    fi
+  fi
+
+  # Create symlinks for all domains
+  for host in "${hosts[@]}"; do
+    ln -sf "$cert_file" "$host.crt"
+    ln -sf "$key_file" "$host.key"
+    if [[ -f ./dhparam.pem ]] && [[ ! -f "$host.dhparam.pem" ]]; then
+      ln -sf ./dhparam.pem "$host.dhparam.pem"
+    fi
+  done
 }
 
 {{ range $hosts, $containers := groupBy $ "Env.VIRTUAL_HOST" }}
